@@ -5,9 +5,10 @@ import { formatMoney } from "./money"
 /**
  * CSV export for the payments table.
  *
- * The column set is fixed. Ops has asked for control over it — that is
- * NWP-101 — but today everyone gets every column, including the card
- * last four, whether or not the file is going to a merchant.
+ * Ops chooses the columns. EXPORT_COLUMNS is the allowlist every requested
+ * name is checked against; DEFAULT_EXPORT_COLUMNS is what ships when nothing
+ * is chosen, and it leaves the card last four out — these files go to
+ * merchants.
  */
 
 export const EXPORT_COLUMNS = [
@@ -24,6 +25,32 @@ export const EXPORT_COLUMNS = [
 ] as const
 
 export type ExportColumn = (typeof EXPORT_COLUMNS)[number]
+
+/** What ships when ops has not chosen: everything except the card last four. */
+export const DEFAULT_EXPORT_COLUMNS: readonly ExportColumn[] =
+  EXPORT_COLUMNS.filter((column) => column !== "last4")
+
+/**
+ * Resolves the `columns` query parameter against the allowlist. Unknown names
+ * are dropped rather than trusted — they reach a header row and a filename.
+ * An absent parameter means the default set; an empty one means ops cleared
+ * every column, which the caller rejects rather than serializing.
+ */
+export function parseExportColumns(param: string | null): ExportColumn[] {
+  if (param === null) return [...DEFAULT_EXPORT_COLUMNS]
+
+  const allowed = new Set<string>(EXPORT_COLUMNS)
+  const columns: ExportColumn[] = []
+
+  for (const name of param.split(",")) {
+    const trimmed = name.trim()
+    if (!allowed.has(trimmed)) continue
+    if (columns.includes(trimmed as ExportColumn)) continue
+    columns.push(trimmed as ExportColumn)
+  }
+
+  return columns
+}
 
 function escapeCell(value: string): string {
   if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`
@@ -66,6 +93,9 @@ export function toCsv(
   return [header, ...rows].join("\n")
 }
 
-export function exportFilename(date = new Date()): string {
-  return `payments-${date.toISOString().slice(0, 10)}.csv`
+export function exportFilename(date = new Date(), scopeLabel?: string): string {
+  const stamp = date.toISOString().slice(0, 10)
+  return scopeLabel
+    ? `payments-${scopeLabel}-${stamp}.csv`
+    : `payments-${stamp}.csv`
 }
